@@ -38,7 +38,9 @@ async function runMigration(migrationFile: string) {
       console.log(sql)
       console.log('=' .repeat(80))
       console.log('\nPlease run this SQL in your Supabase SQL Editor:')
-      console.log(`https://supabase.com/dashboard/project/${supabaseUrl.split('//')[1].split('.')[0]}/sql/new`)
+      if (supabaseUrl) {
+        console.log(`https://supabase.com/dashboard/project/${supabaseUrl.split('//')[1].split('.')[0]}/sql/new`)
+      }
       return
     }
 
