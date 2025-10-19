@@ -12,6 +12,7 @@ import { MultiArtistSelector } from '@/components/analytics/MultiArtistSelector'
 import { usePromotionalInsights } from '@/hooks/usePromotionalInsights'
 import {
   getTopSongsForRanges,
+  getGeographicDataForRanges,
   getGeographicData,
   getDateRange,
   searchLuminateArtists
@@ -65,7 +66,7 @@ export default function AnalyticsPage() {
 
   // Data states
   const [topSongsData, setTopSongsData] = useState<TopSongsAndStreamsResult[]>([])
-  const [geographicData, setGeographicData] = useState<GeographicHeatmapData | null>(null)
+  const [geographicData, setGeographicData] = useState<GeographicHeatmapData[]>([])
 
   // Loading states for each section
   const [loadingTopSongs, setLoadingTopSongs] = useState(false)
@@ -102,7 +103,7 @@ export default function AnalyticsPage() {
     // Clear old data immediately when switching artists
     setError(null)
     setTopSongsData([])
-    setGeographicData(null)
+    setGeographicData([])
     clearInsights() // Clear stale insights from previous artist
 
     // Check if we have a saved aggregation preference for this artist
@@ -228,8 +229,8 @@ export default function AnalyticsPage() {
 
         // Reconstruct topSongsData from cached sculpture data
         const reconstructedData: TopSongsAndStreamsResult[] = [{
-          timeRange: { label: 'Cached', period: 'cached', days: 30 },
-          songs: cachedData.songs.map(song => ({
+          rangeLabel: 'Cached',
+          topSongs: cachedData.songs.map(song => ({
             title: song.title,
             artist: song.artist,
             streams: song.streams,
@@ -238,7 +239,7 @@ export default function AnalyticsPage() {
           }))
         }]
         setTopSongsData(reconstructedData)
-        console.log('✅ Analytics restored with', reconstructedData[0].songs.length, 'songs')
+        console.log('✅ Analytics restored with', reconstructedData[0].topSongs.length, 'songs')
       }
     }
     // Only run on mount or when URL params change
@@ -333,13 +334,19 @@ export default function AnalyticsPage() {
   const fetchGeographic = async (artistId: string) => {
     setLoadingGeographic(true)
     try {
-      const { startDate, endDate } = getDateRange({ label: 'Last 30 Days', period: '30d', days: 30 })
-      const data = await getGeographicData(artistId, startDate, endDate)
+      // Use same time ranges as top songs for consistency
+      const geographicTimeRanges: TimeRange[] = [
+        { label: 'Last 30 Days', period: '30d', days: 30 },
+        { label: 'Last Quarter', period: '90d', days: 90 },
+        { label: '1 Year', period: '365d', days: 365 },
+      ]
 
-      // Override the timeRange with a friendly label
-      if (data) {
-        data.timeRange = 'Last 30 Days'
-      }
+      const data = await getGeographicDataForRanges(artistId, geographicTimeRanges)
+
+      console.log('[Analytics Page] fetchGeographic received data:', {
+        dataLength: data?.length,
+        timeRanges: data?.map(d => d.timeRange)
+      })
 
       setGeographicData(data)
     } catch (err) {
@@ -352,15 +359,26 @@ export default function AnalyticsPage() {
   const fetchGeographicAggregated = async (artistIds: string[]) => {
     setLoadingGeographic(true)
     try {
-      const { startDate, endDate } = getDateRange({ label: 'Last 30 Days', period: '30d', days: 30 })
-      const data = await getAggregatedGeographicData(artistIds, startDate, endDate)
+      // Use same time ranges as top songs for consistency
+      const geographicTimeRanges: TimeRange[] = [
+        { label: 'Last 30 Days', period: '30d', days: 30 },
+        { label: 'Last Quarter', period: '90d', days: 90 },
+        { label: '1 Year', period: '365d', days: 365 },
+      ]
 
-      // Override the timeRange with a friendly label
-      if (data) {
-        data.timeRange = 'Last 30 Days'
-      }
+      // For now, fetch each time period separately for aggregated mode
+      // TODO: Update aggregatedLuminateService to support multi-range requests
+      const dataPromises = geographicTimeRanges.map(async (range) => {
+        const { startDate, endDate } = getDateRange(range)
+        const data = await getAggregatedGeographicData(artistIds, startDate, endDate)
+        if (data) {
+          data.timeRange = range.label
+        }
+        return data
+      })
 
-      setGeographicData(data)
+      const results = await Promise.all(dataPromises)
+      setGeographicData(results.filter(Boolean) as GeographicHeatmapData[])
     } catch (err) {
       console.error('Error fetching aggregated geographic data:', err)
     } finally {
@@ -402,51 +420,100 @@ export default function AnalyticsPage() {
 
   return (
     <div className="min-h-screen bg-white dark:bg-neutral-800">
-      {/* Header */}
-      <div className="border-b border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 sticky top-0 z-10">
+      {/* Header - Collapses when data is loaded */}
+      <motion.div
+        className="border-b border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 sticky top-0 z-10 overflow-hidden"
+        initial={false}
+        animate={{
+          height: selectedArtist && topSongsData.length > 0 ? 'auto' : 'auto',
+        }}
+        transition={{ duration: 0.3, ease: 'easeInOut' }}
+      >
         <div className="px-6 py-6">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <div className="flex items-center gap-3">
-                <h1 className="text-3xl font-bold text-black dark:text-white">Streaming Analytics</h1>
-                <span className="text-sm font-medium text-gray-500 dark:text-neutral-500 uppercase tracking-wide">all platforms</span>
-              </div>
-              {selectedArtist && (
-                <p className="text-gray-600 dark:text-neutral-400 mt-1">
-                  Real-time insights for <span className="font-semibold text-black dark:text-white">{selectedArtist.name}</span>
-                </p>
-              )}
-            </div>
-            {selectedArtist && (
-              <motion.button
-                onClick={handleRefresh}
-                disabled={isLoading}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-100 dark:bg-neutral-700 hover:bg-gray-200 dark:hover:bg-neutral-600 transition-colors disabled:opacity-50"
-                variants={buttonHover}
-                initial="rest"
-                whileHover="hover"
-                whileTap="tap"
-              >
-                <RefreshCw className={`w-4 h-4 text-gray-700 dark:text-neutral-300 ${isLoading ? 'animate-spin' : ''}`} />
-                <span className="text-sm text-gray-700 dark:text-neutral-300">Refresh</span>
-              </motion.button>
-            )}
-          </div>
-
-          {/* Artist Search Bar */}
-          <ArtistSearch onArtistSelect={handleArtistSelect} />
-
-          {error && (
+          {/* Compact Header when data is loaded */}
+          {selectedArtist && topSongsData.length > 0 ? (
             <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.2 }}
+              className="flex items-center justify-between"
             >
-              <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+              <div className="flex items-center gap-4 flex-1">
+                <div className="flex items-center gap-2">
+                  <h1 className="text-xl font-bold text-black dark:text-white">Analytics</h1>
+                  <span className="text-xs font-medium text-gray-500 dark:text-neutral-500 uppercase">all platforms</span>
+                </div>
+                <div className="h-6 w-px bg-gray-300 dark:bg-neutral-600" />
+                <p className="text-sm text-gray-600 dark:text-neutral-400">
+                  <span className="font-semibold text-black dark:text-white">{selectedArtist.name}</span>
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <ArtistSearch onArtistSelect={handleArtistSelect} compact />
+                <motion.button
+                  onClick={handleRefresh}
+                  disabled={isLoading}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100 dark:bg-neutral-700 hover:bg-gray-200 dark:hover:bg-neutral-600 transition-colors disabled:opacity-50"
+                  variants={buttonHover}
+                  initial="rest"
+                  whileHover="hover"
+                  whileTap="tap"
+                >
+                  <RefreshCw className={`w-4 h-4 text-gray-700 dark:text-neutral-300 ${isLoading ? 'animate-spin' : ''}`} />
+                </motion.button>
+              </div>
+            </motion.div>
+          ) : (
+            /* Expanded Header when no data */
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <div className="flex items-center gap-3">
+                    <h1 className="text-3xl font-bold text-black dark:text-white">Streaming Analytics</h1>
+                    <span className="text-sm font-medium text-gray-500 dark:text-neutral-500 uppercase tracking-wide">all platforms</span>
+                  </div>
+                  {selectedArtist && (
+                    <p className="text-gray-600 dark:text-neutral-400 mt-1">
+                      Real-time insights for <span className="font-semibold text-black dark:text-white">{selectedArtist.name}</span>
+                    </p>
+                  )}
+                </div>
+                {selectedArtist && (
+                  <motion.button
+                    onClick={handleRefresh}
+                    disabled={isLoading}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-100 dark:bg-neutral-700 hover:bg-gray-200 dark:hover:bg-neutral-600 transition-colors disabled:opacity-50"
+                    variants={buttonHover}
+                    initial="rest"
+                    whileHover="hover"
+                    whileTap="tap"
+                  >
+                    <RefreshCw className={`w-4 h-4 text-gray-700 dark:text-neutral-300 ${isLoading ? 'animate-spin' : ''}`} />
+                    <span className="text-sm text-gray-700 dark:text-neutral-300">Refresh</span>
+                  </motion.button>
+                )}
+              </div>
+
+              {/* Artist Search Bar */}
+              <ArtistSearch onArtistSelect={handleArtistSelect} />
+
+              {error && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg"
+                >
+                  <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+                </motion.div>
+              )}
             </motion.div>
           )}
         </div>
-      </div>
+      </motion.div>
 
       {/* Loading Overlay */}
       <AnimatePresence>
