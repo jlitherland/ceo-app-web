@@ -2,6 +2,36 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
+  // Basic Auth for entire site (password protection)
+  const basicAuth = request.headers.get('authorization')
+
+  if (process.env.SITE_PASSWORD_USER && process.env.SITE_PASSWORD) {
+    if (basicAuth) {
+      const authValue = basicAuth.split(' ')[1]
+      const [user, pwd] = atob(authValue).split(':')
+
+      if (
+        user !== process.env.SITE_PASSWORD_USER ||
+        pwd !== process.env.SITE_PASSWORD
+      ) {
+        return new NextResponse('Authentication required', {
+          status: 401,
+          headers: {
+            'WWW-Authenticate': 'Basic realm="CEO App - Private Access"',
+          },
+        })
+      }
+    } else {
+      return new NextResponse('Authentication required', {
+        status: 401,
+        headers: {
+          'WWW-Authenticate': 'Basic realm="CEO App - Private Access"',
+        },
+      })
+    }
+  }
+
+  // Continue with Supabase auth
   let supabaseResponse = NextResponse.next({
     request,
   })
