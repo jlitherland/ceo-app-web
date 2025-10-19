@@ -4,6 +4,7 @@
  */
 
 import DOMPurify from 'isomorphic-dompurify'
+import React from 'react'
 
 /**
  * Sanitize HTML content to prevent XSS attacks
