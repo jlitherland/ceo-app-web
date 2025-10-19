@@ -46,7 +46,7 @@ const DEFAULT_TIME_RANGES: TimeRange[] = [
   { label: '1 Month', period: '30d', days: 30 },
   { label: 'Last Quarter', period: '90d', days: 90 },
   { label: '1 Year', period: '365d', days: 365 },
-  { label: 'All Time', period: 'all', days: 3650 }, // ~10 years
+  { label: 'All Time', period: 'atd', days: 3650 }, // ~10 years
 ]
 
 export default function AnalyticsPage() {
