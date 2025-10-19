@@ -194,6 +194,25 @@ function getTopSongsByVelocity(results: TopSongsAndStreamsResult[]): Array<{
 /**
  * Call Claude AI through Railway backend with web search enabled
  */
+/**
+ * Get CSRF token from cookie
+ */
+function getCsrfToken(): string | null {
+  if (typeof document === 'undefined') {
+    return null
+  }
+
+  const cookies = document.cookie.split(';')
+  for (const cookie of cookies) {
+    const [name, value] = cookie.trim().split('=')
+    if (name === 'csrf_token') {
+      return decodeURIComponent(value)
+    }
+  }
+
+  return null
+}
+
 async function analyzeWithClaude(
   topSongs: Array<{ title: string; streams: number; velocity: number }>,
   artistName: string,
@@ -311,12 +330,20 @@ CRITICAL REMINDERS:
     throw new Error('Authentication required. Please sign in.')
   }
 
+  // Get CSRF token for security
+  const csrfToken = getCsrfToken()
+
+  if (!csrfToken) {
+    console.error('No CSRF token found - this may cause authentication to fail')
+  }
+
   // Call Claude through Railway API
   const response = await fetch('/api/claude', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${session.access_token}`,
+      ...(csrfToken && { 'x-csrf-token': csrfToken }),
     },
     body: JSON.stringify({
       prompt,
@@ -325,6 +352,14 @@ CRITICAL REMINDERS:
   })
 
   if (!response.ok) {
+    const errorText = await response.text().catch(() => response.statusText)
+    console.error('[usePromotionalInsights] Claude API error:', {
+      status: response.status,
+      statusText: response.statusText,
+      error: errorText,
+      hasCsrfToken: !!csrfToken,
+      hasJwt: !!session.access_token
+    })
     throw new Error(`Claude API error: ${response.statusText}`)
   }
 

@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react'
 import { Upload, FileText, AlertCircle } from 'lucide-react'
 import { extractTextFromPDF, validatePDFFile } from '@/lib/utils/pdfParser'
+import { extractTextWithOCR } from '@/lib/services/ocrService'
 import { cn } from '@/lib/utils'
 
 interface ContractUploaderProps {
@@ -18,6 +19,7 @@ export function ContractUploader({
 }: ContractUploaderProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
+  const [processingMessage, setProcessingMessage] = useState<string>('Processing...')
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -56,11 +58,48 @@ export function ContractUploader({
         console.log('✅ Text extracted:', result.text.length, 'characters')
         console.log('First 200 chars:', result.text.substring(0, 200))
 
+        // If text extraction failed or returned insufficient text, try OCR fallback
         if (result.text.length < 100) {
-          console.error('❌ Text too short:', result.text.length)
-          setError('Contract text is too short (minimum 100 characters)')
-          setIsProcessing(false)
-          return
+          console.warn('⚠️ Text layer insufficient or missing, attempting OCR fallback...')
+
+          try {
+            setProcessingMessage('Scanned PDF detected. Running text recognition (this may take 30-60 seconds)...')
+
+            const ocrResult = await extractTextWithOCR(file, {
+              maxPages: 20, // Limit to first 20 pages for performance
+              onProgress: (message) => {
+                console.log('OCR Progress:', message)
+                setProcessingMessage(message)
+              }
+            })
+
+            console.log('✅ OCR completed:', ocrResult.text.length, 'characters')
+            console.log('OCR confidence:', ocrResult.confidence)
+            console.log('Processing time:', ocrResult.processingTimeMs, 'ms')
+
+            if (ocrResult.text.length < 100) {
+              console.error('❌ OCR text too short:', ocrResult.text.length)
+              setError('Failed to extract sufficient text from PDF. The document may be corrupted, heavily image-based, or contain non-text content.')
+              setIsProcessing(false)
+              return
+            }
+
+            // Success! Use OCR text
+            console.log('✅ Using OCR extracted text')
+            onContractLoaded(ocrResult.text, file.name)
+            setIsProcessing(false)
+            return
+
+          } catch (ocrError) {
+            console.error('❌ OCR fallback failed:', ocrError)
+            setError(
+              ocrError instanceof Error
+                ? `OCR failed: ${ocrError.message}. Please try a text-based PDF or pre-process your document with OCR software.`
+                : 'OCR extraction failed. Please use a text-based PDF.'
+            )
+            setIsProcessing(false)
+            return
+          }
         }
 
         console.log('✅ Calling onContractLoaded with text length:', result.text.length)
@@ -155,7 +194,12 @@ export function ContractUploader({
           {isProcessing ? (
             <>
               <div className="animate-spin rounded-full h-12 w-12 border-4 border-brand-orange border-t-transparent" />
-              <p className="text-gray-600 dark:text-neutral-300">Processing contract...</p>
+              <p className="text-gray-600 dark:text-neutral-300">{processingMessage}</p>
+              {processingMessage.includes('text recognition') && (
+                <p className="text-sm text-gray-500 dark:text-neutral-400">
+                  This may take 30-60 seconds for scanned documents
+                </p>
+              )}
             </>
           ) : (
             <>
